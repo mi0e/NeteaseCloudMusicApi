@@ -188,13 +188,13 @@ const createRequest = (uri, data, options) => {
 
     const answer = { status: 500, body: {}, cookie: [] }
 
-    let responseEncryption = ENCRYPT_RESPONSE
-    if (options.e_r !== undefined) {
-      responseEncryption = options.e_r
-    } else if (data.e_r !== undefined) {
-      responseEncryption = data.e_r
-    }
-    data.e_r = toBoolean(responseEncryption)
+    data.e_r = toBoolean(
+      options.e_r !== undefined
+        ? options.e_r
+        : data.e_r !== undefined
+        ? data.e_r
+        : ENCRYPT_RESPONSE,
+    )
     // 根据加密方式处理
     switch (crypto) {
       case 'weapi':
