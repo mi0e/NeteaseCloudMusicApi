@@ -1,5 +1,6 @@
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 const express = require('express')
 const request = require('./util/request')
 const packageJSON = require('./package.json')
@@ -33,6 +34,7 @@ const VERSION_CHECK_RESULT = {
  *   port?: number,
  *   host?: string,
  *   checkVersion?: boolean,
+ *   apiToken?: string,
  *   moduleDefs?: ModuleDefinition[]
  * }} NcmApiOptions
  */
@@ -125,13 +127,197 @@ async function checkVersion() {
   })
 }
 
+const API_TOKEN_PARAM = 'apiToken'
+const API_TOKEN_HEADER = 'x-api-token'
+
+function firstString(value) {
+  if (Array.isArray(value)) {
+    return firstString(value[0])
+  }
+  if (value === undefined || value === null) {
+    return ''
+  }
+  return String(value)
+}
+
+function hasOwn(object, key) {
+  return (
+    object &&
+    typeof object === 'object' &&
+    Object.prototype.hasOwnProperty.call(object, key)
+  )
+}
+
+function getUrlPrefixApiToken(req) {
+  const originalUrl = firstString(req.originalUrl || req.url)
+  try {
+    const url = new URL(originalUrl, 'http://localhost')
+    const firstSegment = url.pathname.split('/').filter(Boolean)[0]
+    return firstSegment ? decode(firstSegment) : ''
+  } catch (_) {
+    const firstSegment = originalUrl.split(/[/?#]/).filter(Boolean)[0]
+    return firstSegment ? decode(firstSegment) : ''
+  }
+}
+
+function getRequestApiToken(req) {
+  const authorization = firstString(req.headers.authorization)
+  const bearerToken = authorization.match(/^Bearer\s+(.+)$/i)
+
+  if (bearerToken) {
+    return bearerToken[1].trim()
+  }
+
+  const headerToken = firstString(req.headers[API_TOKEN_HEADER])
+  if (headerToken) {
+    return headerToken
+  }
+
+  if (hasOwn(req.query, API_TOKEN_PARAM)) {
+    return firstString(req.query[API_TOKEN_PARAM])
+  }
+
+  if (hasOwn(req.body, API_TOKEN_PARAM)) {
+    return firstString(req.body[API_TOKEN_PARAM])
+  }
+
+  return ''
+}
+
+function stripApiTokenQueryFromUrl(value) {
+  try {
+    const url = new URL(value, 'http://localhost')
+    url.searchParams.delete(API_TOKEN_PARAM)
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch (_) {
+    const withoutToken = value.replace(
+      new RegExp(`([?&])${API_TOKEN_PARAM}=[^&]*`, 'gi'),
+      '$1',
+    )
+    return withoutToken
+      .replace(/&&+/g, '&')
+      .replace(/\?&+/, '?')
+      .replace(/[?&]$/, '')
+  }
+}
+
+function stripApiTokenPrefixFromUrl(value, apiToken) {
+  try {
+    const url = new URL(value, 'http://localhost')
+    const segments = url.pathname.split('/')
+
+    if (segments.length > 1 && decode(segments[1]) === apiToken) {
+      segments.splice(1, 1)
+      url.pathname = segments.join('/') || '/'
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch (_) {
+    const escapedApiToken = apiToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return value.replace(new RegExp(`^/${escapedApiToken}(?=/|$)`), '') || '/'
+  }
+}
+
+function removeRequestApiToken(req) {
+  if (hasOwn(req.query, API_TOKEN_PARAM)) {
+    delete req.query[API_TOKEN_PARAM]
+  }
+
+  if (hasOwn(req.body, API_TOKEN_PARAM)) {
+    delete req.body[API_TOKEN_PARAM]
+  }
+
+  if (typeof req.url === 'string') {
+    req.url = stripApiTokenQueryFromUrl(req.url)
+  }
+
+  if (typeof req.originalUrl === 'string') {
+    req.originalUrl = stripApiTokenQueryFromUrl(req.originalUrl)
+  }
+}
+
+function removeUrlPrefixApiToken(req, apiToken) {
+  if (typeof req.url === 'string') {
+    req.url = stripApiTokenPrefixFromUrl(req.url, apiToken)
+  }
+
+  if (typeof req.originalUrl === 'string') {
+    req.originalUrl = stripApiTokenPrefixFromUrl(req.originalUrl, apiToken)
+  }
+}
+
+function isApiTokenValid(requestToken, apiToken) {
+  if (!apiToken) {
+    return true
+  }
+
+  if (!requestToken) {
+    return false
+  }
+
+  const requestTokenBuffer = Buffer.from(requestToken)
+  const apiTokenBuffer = Buffer.from(apiToken)
+
+  if (requestTokenBuffer.length !== apiTokenBuffer.length) {
+    return false
+  }
+
+  return crypto.timingSafeEqual(requestTokenBuffer, apiTokenBuffer)
+}
+
+function createApiTokenAuth(apiToken) {
+  return (req, res, next) => {
+    if (!apiToken) {
+      next()
+      return
+    }
+
+    const urlPrefixToken = getUrlPrefixApiToken(req)
+    const requestToken =
+      urlPrefixToken === apiToken ? urlPrefixToken : getRequestApiToken(req)
+
+    if (urlPrefixToken === apiToken) {
+      removeUrlPrefixApiToken(req, apiToken)
+    }
+
+    removeRequestApiToken(req)
+
+    if (!isApiTokenValid(requestToken, apiToken)) {
+      res.status(401).send({
+        code: 401,
+        data: null,
+        msg: 'Unauthorized',
+      })
+      return
+    }
+
+    next()
+  }
+}
+
+function redactApiTokenFromUrl(originalUrl) {
+  try {
+    const url = new URL(originalUrl, 'http://localhost')
+    if (url.searchParams.has(API_TOKEN_PARAM)) {
+      url.searchParams.set(API_TOKEN_PARAM, '[REDACTED]')
+    }
+    return `${url.pathname}${url.search}${url.hash}`
+  } catch (_) {
+    return originalUrl.replace(
+      new RegExp(`([?&]${API_TOKEN_PARAM}=)[^&]*`, 'gi'),
+      '$1[REDACTED]',
+    )
+  }
+}
+
 /**
  * Construct the server of NCM API.
  *
  * @param {ModuleDefinition[]} [moduleDefs] Customized module definitions [advanced]
+ * @param {string} [apiToken] Token required by HTTP API requests.
  * @returns {Promise<import("express").Express>} The server instance.
  */
-async function consturctServer(moduleDefs) {
+async function consturctServer(moduleDefs, apiToken) {
   const app = express()
   const { CORS_ALLOW_ORIGIN } = process.env
   app.set('trust proxy', true)
@@ -149,7 +335,8 @@ async function consturctServer(moduleDefs) {
         'Access-Control-Allow-Credentials': true,
         'Access-Control-Allow-Origin':
           CORS_ALLOW_ORIGIN || req.headers.origin || '*',
-        'Access-Control-Allow-Headers': 'X-Requested-With,Content-Type',
+        'Access-Control-Allow-Headers':
+          'X-Requested-With,Content-Type,Authorization,X-API-Token',
         'Access-Control-Allow-Methods': 'PUT,POST,GET,DELETE,OPTIONS',
         'Content-Type': 'application/json; charset=utf-8',
       })
@@ -178,6 +365,8 @@ async function consturctServer(moduleDefs) {
    */
   app.use(express.json({ limit: '50mb' }))
   app.use(express.urlencoded({ extended: false, limit: '50mb' }))
+
+  app.use(createApiTokenAuth(apiToken))
 
   app.use(fileUpload())
 
@@ -238,7 +427,7 @@ async function consturctServer(moduleDefs) {
           }
           return request(...obj)
         })
-        console.log('[OK]', decode(req.originalUrl))
+        console.log('[OK]', decode(redactApiTokenFromUrl(req.originalUrl)))
 
         const cookies = moduleResponse.cookie
         if (!query.noCookie) {
@@ -258,7 +447,7 @@ async function consturctServer(moduleDefs) {
         }
         res.status(moduleResponse.status).send(moduleResponse.body)
       } catch (/** @type {*} */ moduleResponse) {
-        console.log('[ERR]', decode(req.originalUrl), {
+        console.log('[ERR]', decode(redactApiTokenFromUrl(req.originalUrl)), {
           status: moduleResponse.status,
           body: moduleResponse.body,
         })
@@ -289,9 +478,13 @@ async function consturctServer(moduleDefs) {
  * @param {NcmApiOptions} options
  * @returns {Promise<import('express').Express & ExpressExtension>}
  */
-async function serveNcmApi(options) {
-  const port = Number(options.port || process.env.PORT || '3000')
+async function serveNcmApi(options = {}) {
+  const port = Number(
+    options.port !== undefined ? options.port : process.env.PORT || '3000',
+  )
   const host = options.host || process.env.HOST || ''
+  const apiToken =
+    options.apiToken || process.env.API_TOKEN || process.env.NCM_API_TOKEN || ''
 
   const checkVersionSubmission =
     options.checkVersion &&
@@ -302,7 +495,7 @@ async function serveNcmApi(options) {
         )
       }
     })
-  const constructServerSubmission = consturctServer(options.moduleDefs)
+  const constructServerSubmission = consturctServer(options.moduleDefs, apiToken)
 
   const [_, app] = await Promise.all([
     checkVersionSubmission,
@@ -312,7 +505,15 @@ async function serveNcmApi(options) {
   /** @type {import('express').Express & ExpressExtension} */
   const appExt = app
   appExt.server = app.listen(port, host, () => {
-    console.log(`server running @ http://${host ? host : 'localhost'}:${port}`)
+    const address = appExt.server && appExt.server.address()
+    const displayPort =
+      address && typeof address === 'object' ? address.port : port
+    console.log(
+      `server running @ http://${host ? host : 'localhost'}:${displayPort}`,
+    )
+    if (apiToken) {
+      console.log('api token auth enabled')
+    }
   })
 
   return appExt

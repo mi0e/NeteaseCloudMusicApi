@@ -48,6 +48,20 @@ $ npm install
 $ node app.js
 ```
 
+如果需要给 HTTP API 加 URL token 鉴权, 可以在启动时传入:
+
+```shell
+$ node app.js --api-token your_token
+```
+
+启用后, 把 token 放在接口路径第一段:
+
+```shell
+$ curl "http://localhost:3000/your_token/search?keywords=test"
+```
+
+这样第三方项目通常只需要把 API Base URL 从 `http://localhost:3000` 改成 `http://localhost:3000/your_token`, 原来的 `/search` 等接口路径不需要改. 除启动参数外, 也可以通过 `API_TOKEN` 或 `NCM_API_TOKEN` 环境变量设置. 同时仍兼容 `X-API-Token`、`Authorization: Bearer your_token` 和 `apiToken=your_token`.
+
 服务器启动默认端口为 3000,若不想使用 3000 端口,可使用以下命令: Mac/Linux
 
 ```shell
