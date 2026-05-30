@@ -323,10 +323,6 @@ async function consturctServer(moduleDefs, apiToken) {
   app.set('trust proxy', true)
 
   /**
-   * Serving static files
-   */
-  app.use(express.static(path.join(__dirname, 'public')))
-  /**
    * CORS & Preflight request
    */
   app.use((req, res, next) => {
@@ -367,6 +363,11 @@ async function consturctServer(moduleDefs, apiToken) {
   app.use(express.urlencoded({ extended: false, limit: '50mb' }))
 
   app.use(createApiTokenAuth(apiToken))
+
+  /**
+   * Serving static files
+   */
+  app.use(express.static(path.join(__dirname, 'public')))
 
   app.use(fileUpload())
 

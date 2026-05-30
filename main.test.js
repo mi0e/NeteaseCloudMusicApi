@@ -90,6 +90,22 @@ describe('api token auth', () => {
     assert.strictEqual(response.data.code, 401)
   })
 
+  it('rejects static index without token', async () => {
+    const response = await axios.get(`${host}/`, {
+      validateStatus: () => true,
+    })
+
+    assert.strictEqual(response.status, 401)
+    assert.strictEqual(response.data.code, 401)
+  })
+
+  it('accepts static index with api token in url prefix', async () => {
+    const response = await axios.get(`${host}/${apiToken}/`)
+
+    assert.strictEqual(response.status, 200)
+    assert(response.data.includes('<html'))
+  })
+
   it('accepts api token in url prefix', async () => {
     const response = await axios.get(`${host}/${apiToken}/mock`, {
       params: {
