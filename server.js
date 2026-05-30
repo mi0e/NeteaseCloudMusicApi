@@ -295,6 +295,41 @@ function createApiTokenAuth(apiToken) {
   }
 }
 
+function createApiTokenStaticRedirect(apiToken) {
+  return (req, res, next) => {
+    if (!apiToken) {
+      next()
+      return
+    }
+
+    const originalUrl = firstString(req.originalUrl || req.url)
+    let url
+
+    try {
+      url = new URL(originalUrl, 'http://localhost')
+    } catch (_) {
+      next()
+      return
+    }
+
+    const segments = url.pathname.split('/').filter(Boolean)
+    const hasTokenPrefix = segments[0] && decode(segments[0]) === apiToken
+    const needsTrailingSlash =
+      hasTokenPrefix &&
+      !url.pathname.endsWith('/') &&
+      (segments.length === 1 ||
+        (segments.length === 2 && segments[1] === 'docs'))
+
+    if (!needsTrailingSlash) {
+      next()
+      return
+    }
+
+    url.pathname = `${url.pathname}/`
+    res.redirect(301, `${url.pathname}${url.search}`)
+  }
+}
+
 function redactApiTokenFromUrl(originalUrl) {
   try {
     const url = new URL(originalUrl, 'http://localhost')
@@ -362,6 +397,7 @@ async function consturctServer(moduleDefs, apiToken) {
   app.use(express.json({ limit: '50mb' }))
   app.use(express.urlencoded({ extended: false, limit: '50mb' }))
 
+  app.use(createApiTokenStaticRedirect(apiToken))
   app.use(createApiTokenAuth(apiToken))
 
   /**

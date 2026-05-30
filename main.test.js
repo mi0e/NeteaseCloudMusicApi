@@ -104,6 +104,34 @@ describe('api token auth', () => {
 
     assert.strictEqual(response.status, 200)
     assert(response.data.includes('<html'))
+    assert(response.data.includes('href="./docs/"'))
+  })
+
+  it('keeps api token when redirecting static index path', async () => {
+    const response = await axios.get(`${host}/${apiToken}`, {
+      maxRedirects: 0,
+      validateStatus: () => true,
+    })
+
+    assert.strictEqual(response.status, 301)
+    assert.strictEqual(response.headers.location, `/${apiToken}/`)
+  })
+
+  it('keeps api token when redirecting docs path', async () => {
+    const response = await axios.get(`${host}/${apiToken}/docs`, {
+      maxRedirects: 0,
+      validateStatus: () => true,
+    })
+
+    assert.strictEqual(response.status, 301)
+    assert.strictEqual(response.headers.location, `/${apiToken}/docs/`)
+  })
+
+  it('renders docs entry with api token in url prefix', async () => {
+    const response = await axios.get(`${host}/${apiToken}/docs/`)
+
+    assert.strictEqual(response.status, 200)
+    assert(response.data.includes('window.$docsify'))
   })
 
   it('accepts api token in url prefix', async () => {
