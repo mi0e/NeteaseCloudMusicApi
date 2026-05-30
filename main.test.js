@@ -103,6 +103,7 @@ describe('api token auth', () => {
     const response = await axios.get(`${host}/${apiToken}/`)
 
     assert.strictEqual(response.status, 200)
+    assert(response.headers['content-type'].includes('text/html'))
     assert(response.data.includes('<html'))
     assert(response.data.includes('href="./docs/"'))
   })
@@ -131,6 +132,7 @@ describe('api token auth', () => {
     const response = await axios.get(`${host}/${apiToken}/docs/`)
 
     assert.strictEqual(response.status, 200)
+    assert(response.headers['content-type'].includes('text/html'))
     assert(response.data.includes('window.$docsify'))
   })
 
@@ -142,6 +144,7 @@ describe('api token auth', () => {
     })
 
     assert.strictEqual(response.status, 200)
+    assert(response.headers['content-type'].includes('application/json'))
     assert.strictEqual(response.data.code, 200)
     assert.strictEqual(response.data.keyword, 'test')
   })
